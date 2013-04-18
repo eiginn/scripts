@@ -1,0 +1,4 @@
+#!/bin/bash
+MACADDR="5c:a1:ab:1e:$(dd if=/dev/urandom count=1 2>/dev/null | md5sum | sed 's/^\(..\)\(..\).*$/\1:\2/')"
+echo $MACADDR
+

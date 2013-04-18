@@ -1,0 +1,65 @@
+#!/bin/bash
+
+video_file=''
+pid=''
+fullscreen=''
+#set getopts to be quiet(er)
+OPTERR=0
+usage() {
+cat <<EOF
+Options are:
+-v (video file)
+-k kill mplayer
+-f fullscreen
+EOF
+}
+
+kill_mplayer() {
+  echo "finding mplayer and killing if running"
+  pid=$(ps -ef | grep "[m]player" | awk '{print $2}')
+  [ $pid ] && kill -9 "$pid" > /dev/null
+}
+
+launch_mplayer() {
+  nohup mplayer -noconsolecontrols -really-quiet "$fullscreen" -loop 0 -ontop -stop-xscreensaver -display localhost:0.0 "$video_file" < /dev/null > /dev/null 2>&1 &
+}
+
+if (($# == 0)); then
+  echo "No options specified"
+  usage
+  exit 1
+fi
+
+#set preceding : to use our own option catch-all instead of getopts builtin
+while getopts ":v:khf" opt; do
+  case $opt in
+    v)
+      video_file="$OPTARG"
+      ;;
+    k)
+      kill_mplayer
+      exit 0
+      ;;
+    f)
+      fullscreen='-fs'
+      ;;
+    h)
+      usage
+      exit 1
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+kill_mplayer
+sleep 1
+launch_mplayer
+exit 0

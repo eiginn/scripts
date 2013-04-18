@@ -1,0 +1,78 @@
+#!/bin/bash
+#GistID: 512059402e3e7b7eb5a4
+
+remote_interface=''
+remote_host=''
+pipe='/tmp/sharkfin'
+
+usage() {
+    echo "Options are:"
+    echo "=== REQUIRED ==="
+    echo "-i (interface) on remote machine to sniff"
+    echo "-r (remote host)"
+    echo "=== OPTIONAL ==="
+    echo "-p (path) local pipe file to use, default is /tmp/sharkfin"
+    echo "Breaking the script will kill the tunnel to local machine, not wireshark."
+}
+
+if (($# == 0)); then
+    echo "No options specified"
+    usage
+    exit 1
+fi
+
+if ! ( echo "$*" | grep -- '-r' > /dev/null && echo "$*" | grep -- '-i' > /dev/null ); then
+    usage
+    exit 1
+fi
+
+while getopts ":i:r:p:hD" opt; do
+    case $opt in
+        i)
+            remote_interface="$OPTARG"
+            ;;
+        r)
+            remote_host="$OPTARG"
+            ;;
+        p)
+            pipe="$OPTARG"
+            ;;
+        h)
+            usage
+            exit 1
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            usage
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# make FIFO pipe for wireshark to listen on
+if [ -e $pipe ] || [ -p $pipe ]; then
+    echo -n "$pipe exists! overwrite? (y/n) "
+    read answer
+    if [ $answer != 'y' ]; then
+        exit 1
+    fi
+    rm "$pipe"
+fi
+
+mkfifo "$pipe"
+
+# start wireshark listening on fifo and background
+wireshark -k -i "$pipe" &
+
+# ssh to remote and listen on interface ignoring port 22 so we no not listen to self
+ssh $remote_host "sudo tcpdump -s 0 -U -n -w - -i $remote_interface 'not port 22'" > "$pipe"
+
+#remove pipe when done
+echo "Cleaning up pipe at $pipe"
+rm "$pipe"
+
