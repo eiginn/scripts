@@ -1,0 +1,190 @@
+#!/bin/bash
+
+## The most bloated single use curl wrapper to end all curl curl wrappers ##
+
+#/ Pipe text to pushover and specify app
+#/ Example:
+#/ echo "stuff" | pushover
+#/ Options: 
+#/ -a (bash|raspi) (default bash)
+#/ -D set debug (will also save tmpfile in /tmp
+#/ -t {title}
+#/ message content is always piped into script
+#/ -p {priority} # normal is 0, silent is -1, critical is 1, 
+#/ and 2 will require acknowledgement (pushover only)
+#/ Following for priority 2 only
+#/ -r {retry time in seconds} how often should notification be sent until ack (default 60)
+#/ -e {expire time in seconds} when to stop trying to notify (default 3600)
+#/ -c {callback url} url to request when acknowledgement is recieved
+#/ -s sound (for pushover, see pushover api for list)
+#/ when using priority 2 a JSON response is gotten back with a receipt id that 
+#/ will match up with what is sent to the callback url
+
+# Text color variables
+bldred='\e[1;31m'       # red    - Bold
+bldgrn='\e[1;32m'       # green
+bldylw='\e[1;33m'       # yellow
+bldblu='\e[1;34m'       # blue
+bldpur='\e[1;35m'       # purple
+txtrst='\e[0m'          # Text reset
+
+# Feedback indicators
+info="${bldblu}[${bldylw} ** ${bldblu}]${txtrst}"
+request="${bldblu}[${bldylw} ?? ${bldblu}]${txtrst}"
+pass="${bldblu}[${bldgrn} ok ${bldblu}]${txtrst}"
+warn="${bldblu}[${bldpur} !! ${bldblu}]${txtrst}"
+fail="${bldblu}[${bldred} !! ${bldblu}]${txtrst}"
+sh_info() { [ $DEBUG ] && echo -e "${info} $1"; }
+sh_request() { echo -e "${request} $1"; }
+sh_pass() { [ $DEBUG ] && echo -e "${pass} $1"; }
+sh_warn() { [ $DEBUG ] && echo -e "${warn} $1"; }
+sh_fail() { echo -e "${fail} $1"; }
+sh_reset() { echo -ne "${txtrst}"; }
+
+usage() { grep "^#/" "$0" | cut -c"4-" >&2; }
+
+die() {
+    sh_fail "$@" >&2
+    usage
+    unset DEBUG
+    (type cleanup | grep 'is a shell function' &> /dev/null) && cleanup
+    exit 1
+}
+
+cleanup() {
+    sh_info "Cleaning up, removing $TMPFILE and resetting shell"
+    sh_reset
+#    [ $DEBUG ] || shred $TMPFILE &> /dev/null
+#    [ $DEBUG ] || rm $TMPFILE &> /dev/null
+#    [ $DEBUG ] && sh_info "Temp file with pushover receipts was left at $TMPFILE"
+    shred $TMPFILE &> /dev/null
+    rm $TMPFILE &> /dev/null
+}
+
+# won't work for multiline stuff, here only for reference
+read_pipe() { read "$@" <&0; }
+
+# Pushover
+declare -A pushover_user_tokens
+pushover_api_url='https://api.pushover.net/1/messages.json'
+app_token_bash='<FIXME>'
+app_token_raspi='<FIXME>'
+callback_url_def='<FIXME>'
+pushover_user_tokens[user1]='<FIXME>'
+#pushover_user_tokens[user2]='test_token'
+#pushover_user_tokens[user3]='test_token'
+#pushover_user_tokens[user4]='test_token'
+
+# Prowl
+prowl_api_url='https://prowl.weks.net/publicapi/add'
+declare -A prowl_user_tokens
+#prowl_user_tokens[user5]='test_token'
+#pushover_user_tokens[user6]='test_token'
+
+while getopts ":Da:p:e:r:c:t:hs:" opt; do 
+    case $opt in 
+        D)
+            DEBUG='1'
+            ;;
+        a)
+            case $OPTARG in
+                bash)
+                    app_token=${app_token_bash}
+                    ;;
+                raspi)
+                    app_token=${app_token_raspi}
+                    ;;
+                *)
+                    die 'No token for app'
+                    ;;
+            esac
+            ;;
+        p)
+            priority=$OPTARG
+            ;;
+        e)
+            expire_time=$OPTARG
+            ;;
+        r)
+            retry_time=$OPTARG
+            ;;
+        c)
+            callback_url=$OPTARG
+            ;;
+        t)
+            title=$OPTARG
+            ;;
+        s)
+            sound=$OPTARG
+            ;;
+        h)
+            usage
+            exit 0
+            ;;
+        \?)
+            die "Invalid option: -$OPTARG"
+            ;;
+        :)
+            die "Option -$OPTARG requires an argument"
+            ;; 
+    esac
+done
+
+# check that script is in a pipeline
+if [ -t 0 ] && [ -t 1 ]; then
+    die "Not in a pipeline"
+else
+    #read_pipe message
+    message="$(cat -)"
+fi
+
+TMPFILE=$(mktemp /tmp/push.XXXXXXXXXX) || die "Cannot create temp file"
+sh_info "Tempfile is $TMPFILE"
+trap cleanup HUP INT TERM
+
+# run pushover curls in parallel
+for i in "${!pushover_user_tokens[@]}"; do
+    ( curl -s --connect-timeout 10 --max-time 10 \
+        -F "timestamp=$(date +%s)" \
+        -F "token=${app_token:-$app_token_bash}" \
+        -F "user=${pushover_user_tokens[$i]}" \
+        -F "title=${title:-Bash}" \
+        -F "message=${message}" \
+        -F "priority=${priority:-0}" \
+        -F "retry=${rety_time:-60}" \
+        -F "expire=${expire_time:-3600}" \
+        -F "callback=${callback_url:-$callback_url_def}" \
+        $(if [ $sound ]; then echo "-F sound=${sound}"; fi) \
+        "${pushover_api_url}" >> $TMPFILE
+    if [ "$?" -eq 0 ]; then
+        sh_pass "$i alerted"
+    else
+        sh_fail "$i was not alerted"
+    fi ) &
+done
+
+# run prowl curls in parallel
+for i in "${!prowl_user_tokens[@]}"; do
+    ( curl -s --connect-timeout 10 --max-time 10 \
+        -F "apikey=${prowl_user_tokes[$i]}" \
+        -F "priority=${priority-0}" \
+        -F "application=${app:-Bash}" \
+        -F "event=${title:-Bash}" \
+        -F "description=${message}" \
+        "${prowl_api_url}" > /dev/null
+    if [ "$?" -eq 0 ]; then
+        sh_pass "$i alerted"
+    else
+        sh_fail "$i was not alerted"
+    fi ) &
+done
+
+# wait for curls to finish
+for i in $(jobs -p); do
+    wait $i
+done
+
+# Needs jq installed from http://stedolan.github.io/jq/
+[ $DEBUG ] && jq -V &> /dev/null && sh_info "Response was: \n$(jq '.' $TMPFILE)"
+cleanup
+exit 0
