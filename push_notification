@@ -1,6 +1,6 @@
 #!/bin/bash
 
-## The most bloated single use curl wrapper to end all curl curl wrappers ##
+## The most bloated single use curl wrapper to end all curl wrappers ##
 
 #/ Pipe text to pushover and specify app
 #/ Example:
