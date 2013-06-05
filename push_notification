@@ -1,24 +1,31 @@
 #!/bin/bash
-
-## The most bloated single use curl wrapper to end all curl wrappers ##
-
-#/ Pipe text to pushover and specify app
-#/ Example:
-#/ echo "stuff" | pushover
-#/ Options: 
-#/ -a (bash|raspi) (default bash)
-#/ -D set debug (will also save tmpfile in /tmp
-#/ -t {title}
-#/ message content is always piped into script
-#/ -p {priority} # normal is 0, silent is -1, critical is 1, 
-#/ and 2 will require acknowledgement (pushover only)
-#/ Following for priority 2 only
-#/ -r {retry time in seconds} how often should notification be sent until ack (default 60)
-#/ -e {expire time in seconds} when to stop trying to notify (default 3600)
-#/ -c {callback url} url to request when acknowledgement is recieved
-#/ -s sound (for pushover, see pushover api for list)
-#/ when using priority 2 a JSON response is gotten back with a receipt id that 
-#/ will match up with what is sent to the callback url
+#GistID: 34cec5d18b6614786a30
+#/ Usage:
+#/ pushover [-DTatprecs]
+#/  where: -D: Set debug
+#/         -T: Send test as bash, implies -D
+#/         -a: Set app {bash|nagios|raspi|ossec} default: bash
+#/         -t: {title} default will be app name
+#/         -p: {priority} value -1..2 default 0, if 2:
+#/               -r: {retry time in seconds} time between retried alerts
+#/                          default: 60
+#/               -e: {expire time in seconds} how long to retry for
+#/                          default: 3600
+#/               -c: (callback url} url to request when acknowledgement is recieved
+#/                          will reply with serial number from when alert was submitted
+#/         -s: {sound} see pushover api for list
+#/ 
+#/ Example: echo "rsync fininshed" | pushover
+#/  will be send as bash and priority 0
+#/ 
+#/ echo 'Apache is down!!' | pushover -a bash -p 2 -c 'http://requestb.in/yk5vdvyk'
+#/ output will be something like this if you have jq installed (http://stedolan.github.io/jq)
+#/ [ ?? ] Response was: 
+#/ {
+#/   "request": "971b17df76e617aeb87b2922c489da43",
+#/   "status": 1,
+#/   "receipt": "Pt6gsA4R6TF3d387MsPDX12pQTEjfB"
+#/ }
 
 # Text color variables
 bldred='\e[1;31m'       # red    - Bold
@@ -68,8 +75,9 @@ read_pipe() { read "$@" <&0; }
 declare -A pushover_user_tokens
 pushover_api_url='https://api.pushover.net/1/messages.json'
 app_token_bash='<FIXME>'
+app_token_nagios='<FIXME>'
 app_token_raspi='<FIXME>'
-callback_url_def='<FIXME>'
+app_token_ossec='<FIXME>'
 pushover_user_tokens[user1]='<FIXME>'
 #pushover_user_tokens[user2]='test_token'
 #pushover_user_tokens[user3]='test_token'
@@ -81,7 +89,10 @@ declare -A prowl_user_tokens
 #prowl_user_tokens[user5]='test_token'
 #pushover_user_tokens[user6]='test_token'
 
-while getopts ":Da:p:e:r:c:t:hs:" opt; do 
+# http://requestb.in/1ine2ju1?inspect
+callback_url_def='http://requestb.in/1exvi0z1'
+
+while getopts ":Da:p:e:r:c:t:hTs:" opt; do 
     case $opt in 
         D)
             DEBUG='1'
@@ -90,9 +101,19 @@ while getopts ":Da:p:e:r:c:t:hs:" opt; do
             case $OPTARG in
                 bash)
                     app_token=${app_token_bash}
+                    title=${title:-BASH}
+                    ;;
+                nagios)
+                    app_token=${app_token_nagios}
+                    title=${title:-Nagios}
                     ;;
                 raspi)
                     app_token=${app_token_raspi}
+                    title=${title:-"Raspberry Pi"}
+                    ;;
+                ossec)
+                    app_token=${app_token_ossec}
+                    title=${title:-OSSEC}
                     ;;
                 *)
                     die 'No token for app'
@@ -117,6 +138,12 @@ while getopts ":Da:p:e:r:c:t:hs:" opt; do
         s)
             sound=$OPTARG
             ;;
+        T)
+            test_set='1'
+            DEBUG='1'
+            message="Test at $(date)"
+            title='THIS IS ONLY A TEST'
+            ;;
         h)
             usage
             exit 0
@@ -132,7 +159,7 @@ done
 
 # check that script is in a pipeline
 if [ -t 0 ] && [ -t 1 ]; then
-    die "Not in a pipeline"
+    [ $test_set ] || die "Not in a pipeline"
 else
     #read_pipe message
     message="$(cat -)"
@@ -184,7 +211,7 @@ for i in $(jobs -p); do
     wait $i
 done
 
-# Needs jq installed from http://stedolan.github.io/jq/
-[ $DEBUG ] && jq -V &> /dev/null && sh_info "Response was: \n$(jq '.' $TMPFILE)"
+# http://stedolan.github.io/jq/
+[[ $DEBUG == '1' || $priority == '2' ]] && jq -V &> /dev/null && sh_request "Response was: \n$(jq '.' $TMPFILE)"
 cleanup
 exit 0
